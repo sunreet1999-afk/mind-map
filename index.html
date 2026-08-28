@@ -1,0 +1,1221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0e1117" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Mindly" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<title>Mindly — Mind Map</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" />
+<style>
+:root{
+  --bg:#0e1117; --bg-2:#151a23; --grid:rgba(255,255,255,.045);
+  --panel:rgba(23,28,38,.82); --panel-brd:rgba(255,255,255,.09);
+  --text:#e8ecf3; --text-dim:#9aa5b7; --accent:#5b8cff;
+  --node-bg:#1b212d; --node-brd:rgba(255,255,255,.10); --edge:rgba(255,255,255,.22);
+  --shadow:0 10px 30px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.35);
+  --radius:14px;
+}
+:root[data-theme="light"]{
+  --bg:#f6f7fb; --bg-2:#eef1f7; --grid:rgba(20,30,60,.06);
+  --panel:rgba(255,255,255,.82); --panel-brd:rgba(20,30,60,.10);
+  --text:#141a26; --text-dim:#5d6880; --accent:#3563e9;
+  --node-bg:#ffffff; --node-brd:rgba(20,30,60,.10); --edge:rgba(30,40,70,.28);
+  --shadow:0 8px 24px rgba(25,35,70,.10), 0 1px 3px rgba(25,35,70,.10);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden}
+body{
+  font:15px/1.45 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--text); background:var(--bg);
+  -webkit-font-smoothing:antialiased; user-select:none;
+}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* ---------- canvas ---------- */
+#stage{position:fixed;inset:0;overflow:hidden;cursor:grab;touch-action:none;overscroll-behavior:none;
+  background:
+    radial-gradient(1200px 700px at 70% -10%, var(--bg-2), transparent 70%),
+    var(--bg);
+}
+#stage.panning{cursor:grabbing}
+#grid{position:absolute;inset:-200%;
+  background-image:radial-gradient(var(--grid) 1.4px, transparent 1.4px);
+  background-size:26px 26px; pointer-events:none;}
+#world{position:absolute;top:0;left:0;width:0;height:0;transform-origin:0 0}
+#edges{position:absolute;overflow:visible;pointer-events:none;left:0;top:0;width:1px;height:1px}
+.edge{fill:none;stroke-linecap:round;transition:stroke-width .15s}
+
+/* ---------- nodes ---------- */
+.node{
+  position:absolute; width:max-content; max-width:230px; min-width:44px; touch-action:none;
+  padding:9px 14px 9px 15px; border-radius:var(--radius);
+  background:var(--node-bg); border:1px solid var(--node-brd);
+  box-shadow:var(--shadow); color:var(--text);
+  cursor:default; white-space:pre-wrap; word-break:break-word;
+  transition:box-shadow .18s, border-color .18s, transform .12s;
+  will-change:transform;
+}
+.node::before{
+  content:""; position:absolute; left:0; top:9px; bottom:9px; width:4px;
+  border-radius:4px; background:var(--c,var(--accent)); opacity:.95;
+}
+.node.root{
+  padding:14px 24px; font-size:19px; font-weight:650; border-radius:18px;
+  background:linear-gradient(140deg,var(--c),color-mix(in srgb,var(--c) 55%, #000 30%));
+  color:#fff; border-color:transparent;
+  box-shadow:0 14px 40px color-mix(in srgb,var(--c) 35%, transparent);
+}
+.node.root::before{display:none}
+.node:hover{border-color:color-mix(in srgb,var(--c) 55%, transparent)}
+.node.selected{
+  border-color:var(--c);
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--c) 45%, transparent), var(--shadow);
+}
+.node.editing{cursor:text;user-select:text;outline:none}
+.node.dragging{opacity:.92;transform:scale(1.02);z-index:50}
+.node.collapsed-parent .badge{display:flex}
+.badge{
+  display:none; position:absolute; right:-11px; top:50%; transform:translateY(-50%);
+  min-width:22px;height:22px;padding:0 6px;border-radius:11px;
+  align-items:center;justify-content:center;font-size:11px;font-weight:700;
+  background:var(--c);color:#fff;box-shadow:var(--shadow);
+}
+.handle{
+  position:absolute; right:-26px; top:50%; transform:translateY(-50%) scale(.6);
+  width:20px;height:20px;border-radius:50%; background:var(--c); color:#fff;
+  display:flex;align-items:center;justify-content:center; font-size:14px; line-height:1;
+  opacity:0; transition:.15s; cursor:pointer; box-shadow:var(--shadow);
+}
+.node:hover .handle,.node.selected .handle{opacity:1;transform:translateY(-50%) scale(1)}
+.node.collapsed-parent .handle{display:none}
+
+/* ---------- chrome ---------- */
+.bar{
+  position:fixed; z-index:100; display:flex; align-items:center; gap:4px;
+  padding:7px; border-radius:16px;
+  background:var(--panel); border:1px solid var(--panel-brd);
+  backdrop-filter:blur(18px) saturate(160%); box-shadow:var(--shadow);
+}
+#topbar{top:16px;left:50%;transform:translateX(-50%)}
+#brand{display:flex;align-items:center;gap:9px;padding:0 12px 0 6px;font-weight:700;letter-spacing:-.2px}
+#brand i{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,#5b8cff,#a86bff);display:block}
+.sep{width:1px;height:24px;background:var(--panel-brd);margin:0 5px}
+.btn{
+  height:36px;min-width:36px;padding:0 11px;border-radius:10px;
+  display:inline-flex;align-items:center;gap:7px;color:var(--text-dim);
+  transition:.14s; font-size:13.5px; font-weight:500; white-space:nowrap;
+}
+.btn:hover{background:color-mix(in srgb,var(--text) 9%, transparent);color:var(--text)}
+.btn:active{transform:translateY(1px)}
+.btn[disabled]{opacity:.32;pointer-events:none}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.1);color:#fff}
+.btn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+#zoombar{bottom:18px;left:18px}
+#zoomval{min-width:52px;text-align:center;font-variant-numeric:tabular-nums;font-size:13px;color:var(--text-dim)}
+#colorbar{bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;transition:.2s}
+#colorbar.show{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.swatch{width:26px;height:26px;border-radius:9px;border:2px solid transparent;transition:.14s;cursor:pointer}
+.swatch:hover{transform:scale(1.14)}
+.swatch.on{border-color:var(--text)}
+#hintbar{bottom:18px;right:18px;color:var(--text-dim);font-size:12.5px;padding:9px 13px}
+kbd{
+  display:inline-block;padding:1px 6px;border-radius:6px;font:600 11px/1.6 inherit;
+  background:color-mix(in srgb,var(--text) 12%, transparent);color:var(--text);margin:0 1px;
+}
+/* menus */
+.menu{
+  position:fixed;z-index:200;min-width:186px;padding:6px;border-radius:14px;
+  background:var(--panel);border:1px solid var(--panel-brd);
+  backdrop-filter:blur(18px) saturate(160%);box-shadow:var(--shadow);
+  display:none;
+}
+.menu.show{display:block;animation:pop .13s ease-out}
+@keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.98)}}
+.menu .btn{width:100%;justify-content:flex-start;height:34px}
+/* maps panel */
+#mapsMenu{min-width:272px;max-width:300px;max-height:min(62vh,430px);overflow-y:auto}
+.mhead{padding:6px 10px 8px;font-size:11px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--text-dim)}
+.maprow{display:flex;align-items:center;gap:9px;width:100%;height:38px;padding:0 8px;
+  border-radius:10px;cursor:pointer;transition:.14s;color:var(--text-dim)}
+.maprow:hover{background:color-mix(in srgb,var(--text) 9%, transparent);color:var(--text)}
+.maprow.on{background:color-mix(in srgb,var(--accent) 16%, transparent);color:var(--text)}
+.maprow .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.maprow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:13.5px;font-weight:500}
+.maprow .meta{font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums;flex:none}
+.maprow .x{width:24px;height:24px;flex:none;border-radius:7px;display:grid;place-items:center;
+  opacity:0;transition:.12s;color:var(--text-dim)}
+.maprow:hover .x{opacity:.75}
+.maprow .x:hover{opacity:1;background:color-mix(in srgb,#e0559b 26%, transparent);color:var(--text)}
+.maprow .x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.mdiv{height:1px;background:var(--panel-brd);margin:6px 4px}
+/* modal */
+#overlay{position:fixed;inset:0;z-index:300;display:none;place-items:center;
+  background:rgba(5,8,14,.55);backdrop-filter:blur(4px)}
+#overlay.show{display:grid}
+.sheet{
+  width:min(520px,92vw);padding:26px 28px;border-radius:20px;
+  background:var(--panel);border:1px solid var(--panel-brd);
+  backdrop-filter:blur(22px);box-shadow:var(--shadow);
+}
+.sheet h2{margin:0 0 4px;font-size:20px;letter-spacing:-.3px}
+.sheet p{margin:0 0 18px;color:var(--text-dim);font-size:13.5px}
+.keys{display:grid;grid-template-columns:1fr 1fr;gap:9px 22px;font-size:13.5px}
+.keys div{display:flex;justify-content:space-between;gap:10px;color:var(--text-dim)}
+.keys b{font-weight:500;color:var(--text)}
+#toast{
+  position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(12px);
+  z-index:400;padding:10px 18px;border-radius:12px;font-size:13.5px;
+  background:var(--panel);border:1px solid var(--panel-brd);box-shadow:var(--shadow);
+  backdrop-filter:blur(18px);opacity:0;pointer-events:none;transition:.22s;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#mobilebar{display:none}
+.mlbl{font-size:10.5px;font-weight:600;letter-spacing:.02em}
+
+/* touch devices: affordances can't rely on hover */
+@media (pointer:coarse){
+  .handle{opacity:1;transform:translateY(-50%) scale(1);
+    width:28px;height:28px;font-size:18px;right:-48px}
+  .node.side-l .handle{left:-48px;right:auto}
+  .badge.open{opacity:1}
+  .node{padding:11px 15px 11px 16px}
+  .node.root{padding:15px 24px}
+}
+
+@media (max-width:760px){
+  #brand span,.btn .lbl{display:none}
+  #hintbar,#zoombar{display:none}
+  #topbar{top:calc(10px + env(safe-area-inset-top));
+    left:10px;right:10px;width:auto;transform:none;
+    overflow-x:auto;scrollbar-width:none;justify-content:flex-start}
+  #topbar::-webkit-scrollbar{display:none}
+  #topbar .btn{flex:none}
+  .menu{max-width:calc(100vw - 20px)}
+
+  #mobilebar{display:flex;justify-content:space-between;gap:2px;
+    left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));
+    transform:none;padding:6px}
+  #mobilebar .btn{flex:1;height:50px;min-width:0;padding:0 4px;
+    flex-direction:column;gap:3px}
+  #mobilebar .btn svg{width:19px;height:19px}
+
+  #colorbar{bottom:calc(96px + env(safe-area-inset-bottom));
+    left:10px;right:10px;transform:translateY(14px);
+    justify-content:center;flex-wrap:wrap}
+  #colorbar.show{transform:translateY(0)}
+  .swatch{width:30px;height:30px}
+  #toast{bottom:calc(150px + env(safe-area-inset-bottom))}
+  .sheet{padding:22px}
+  .keys{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="grid"></div>
+  <div id="world">
+    <svg id="edges"></svg>
+  </div>
+</div>
+
+<div class="bar" id="topbar">
+  <div id="brand"><i></i><span>Mindly</span></div>
+  <div class="sep"></div>
+  <button class="btn primary" data-act="child" title="Add child (Tab)">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">Idea</span>
+  </button>
+  <button class="btn" data-act="sibling" title="Add sibling (Enter)">
+    <svg viewBox="0 0 24 24"><path d="M4 7h9M4 17h9M17 4v16M20 12h-6"/></svg>
+  </button>
+  <button class="btn" data-act="del" title="Delete node (Del)">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>
+  </button>
+  <div class="sep"></div>
+  <button class="btn" data-act="undo" title="Undo (Ctrl+Z)">
+    <svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg>
+  </button>
+  <button class="btn" data-act="redo" title="Redo (Ctrl+Shift+Z)">
+    <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg>
+  </button>
+  <div class="sep"></div>
+  <button class="btn" data-act="tidy" title="Auto-arrange (Ctrl+L)">
+    <svg viewBox="0 0 24 24"><path d="M4 12h6M14 6h6M14 12h6M14 18h6M10 12V6h4M10 12v6h4"/></svg><span class="lbl">Tidy</span>
+  </button>
+  <button class="btn" data-act="fit" title="Fit to screen (F)">
+    <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
+  <div class="sep"></div>
+  <button class="btn" data-act="mapsmenu" title="Your maps">
+    <svg viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg><span class="lbl">Maps</span>
+  </button>
+  <button class="btn" data-act="filemenu" title="File">
+    <svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 17v3h16v-3"/></svg><span class="lbl">File</span>
+  </button>
+  <button class="btn" data-act="theme" title="Toggle theme">
+    <svg viewBox="0 0 24 24" id="themeIcon"><path d="M21 13a8.5 8.5 0 01-10-10 8.5 8.5 0 1010 10z"/></svg>
+  </button>
+  <button class="btn" data-act="help" title="Shortcuts (?)">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.5a2.5 2.5 0 013.9-1.6c1.4.9 1 2.6-.3 3.3-.8.4-1.2 1-1.2 1.8M12 17.2h.01"/></svg>
+  </button>
+</div>
+
+<div class="bar" id="zoombar">
+  <button class="btn" data-act="zoomout"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+  <div id="zoomval">100%</div>
+  <button class="btn" data-act="zoomin"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <div class="sep"></div>
+  <button class="btn" data-act="reset" title="Reset zoom (Ctrl+0)">1:1</button>
+</div>
+
+<div class="bar" id="colorbar"></div>
+
+<div class="bar" id="mobilebar">
+  <button class="btn" data-act="child" title="Add child">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="mlbl">Child</span>
+  </button>
+  <button class="btn" data-act="sibling" title="Add sibling">
+    <svg viewBox="0 0 24 24"><path d="M4 7h9M4 17h9M17 4v16M20 12h-6"/></svg><span class="mlbl">Next</span>
+  </button>
+  <button class="btn" data-act="rename" title="Rename">
+    <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg><span class="mlbl">Rename</span>
+  </button>
+  <button class="btn" data-act="collapse" title="Collapse or expand">
+    <svg viewBox="0 0 24 24"><path d="M8 9l4 4 4-4"/><path d="M4 5h16"/><path d="M4 19h16"/></svg><span class="mlbl">Fold</span>
+  </button>
+  <button class="btn" data-act="del" title="Delete">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg><span class="mlbl">Delete</span>
+  </button>
+</div>
+
+<div class="bar" id="hintbar">
+  <kbd>Tab</kbd> child &nbsp; <kbd>Enter</kbd> sibling &nbsp; <kbd>F2</kbd> rename &nbsp; <kbd>?</kbd> more
+</div>
+
+<div class="menu" id="mapsMenu">
+  <div class="mhead">Your mind maps</div>
+  <div id="mapsList"></div>
+  <div class="mdiv"></div>
+  <button class="btn" data-act="newmap"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New mind map</button>
+  <button class="btn" data-act="dupmap"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5h10"/></svg>Duplicate this map</button>
+</div>
+
+<div class="menu" id="fileMenu">
+  <button class="btn" data-act="png"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>Export PNG</button>
+  <button class="btn" data-act="json"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4M4 17v3h16v-3"/></svg>Export JSON</button>
+  <button class="btn" data-act="import"><svg viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4M4 17v3h16v-3"/></svg>Import JSON</button>
+</div>
+
+<div id="overlay">
+  <div class="sheet">
+    <h2>Keyboard shortcuts</h2>
+    <p>Everything is faster from the keyboard.</p>
+    <div class="keys">
+      <div><b>Add child</b><kbd>Tab</kbd></div>
+      <div><b>Add sibling</b><kbd>Enter</kbd></div>
+      <div><b>Rename</b><kbd>F2</kbd> / dbl-click</div>
+      <div><b>Delete branch</b><kbd>Del</kbd></div>
+      <div><b>Move selection</b><kbd>← ↑ ↓ →</kbd></div>
+      <div><b>Collapse / expand</b><kbd>Space</kbd></div>
+      <div><b>Undo / Redo</b><kbd>Ctrl</kbd>+<kbd>Z</kbd></div>
+      <div><b>Auto-arrange</b><kbd>Ctrl</kbd>+<kbd>L</kbd></div>
+      <div><b>Fit to screen</b><kbd>F</kbd></div>
+      <div><b>Reset zoom</b><kbd>Ctrl</kbd>+<kbd>0</kbd></div>
+      <div><b>Pan</b>drag canvas</div>
+      <div><b>Zoom</b>wheel / pinch</div>
+    </div>
+    <p style="margin:20px 0 0">Your map saves itself in this browser automatically.</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+<input type="file" id="fileInput" accept="application/json,.json" hidden />
+<style>
+.node{transform:translate(0,0)}
+.node.dragging{transition:none}
+.txt{outline:none;white-space:pre-wrap;min-width:14px}
+.node.drop-target{box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 60%, transparent), var(--shadow)}
+.node.side-l .handle{right:auto;left:-40px}
+.node.side-l .badge{right:auto;left:-11px}
+.node .handle{right:-40px}
+.badge{cursor:pointer;user-select:none}
+.badge.open{background:transparent;color:var(--c);
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--c) 55%, transparent);opacity:0;transition:.15s}
+.node:hover .badge.open,.node.selected .badge.open{opacity:1}
+.node.has-kids .badge{display:flex}
+</style>
+<script>
+(function(){
+"use strict";
+
+/* ---------- constants ---------- */
+var PALETTE = ["#5b8cff","#7c5cff","#e0559b","#f2704b","#f0b429","#22b07d","#18b3c7","#8d95a6"];
+var HGAP = 68, VGAP = 16, KEY = "mindly.map.v2", TKEY = "mindly.theme",
+    MAPS = "mindly.maps.v1";
+
+/* ---------- state ---------- */
+var M = null;
+var sel = null, editing = null, mapId = null;
+var view = { x: 0, y: 0, k: 1 };
+var els = new Map();
+var undoStack = [], redoStack = [], saveTimer = null;
+
+var $ = function(s){ return document.querySelector(s); };
+var stage = $("#stage"), world = $("#world"), svg = $("#edges");
+var uid = function(){ return Math.random().toString(36).slice(2, 9); };
+
+/* ---------- model helpers ---------- */
+function N(id){ return M.nodes[id]; }
+function kids(id){ return N(id).children; }
+function isRoot(id){ return id === M.rootId; }
+
+function makeNode(text, parent, side){
+  var n = { id: uid(), text: text, parent: parent, children: [], side: side || "r",
+            collapsed: false, color: null, x: 0, y: 0, w: 120, h: 40 };
+  M.nodes[n.id] = n;
+  return n;
+}
+function colorOf(n){
+  while (n && !n.color) n = n.parent ? N(n.parent) : null;
+  return n ? n.color : PALETTE[0];
+}
+function depthOf(n){ var d = 0; while (n.parent){ n = N(n.parent); d++; } return d; }
+function walk(id, fn){ fn(N(id)); kids(id).forEach(function(c){ walk(c, fn); }); }
+function isAncestor(a, b){
+  var n = N(b);
+  while (n){ if (n.id === a) return true; n = n.parent ? N(n.parent) : null; }
+  return false;
+}
+
+function starter(){
+  M = { rootId: null, nodes: {} };
+  var root = makeNode("My Mind Map", null);
+  root.color = PALETTE[0];
+  M.rootId = root.id;
+  [["Goals","r",PALETTE[1]],["Ideas","r",PALETTE[2]],
+   ["Research","l",PALETTE[5]],["Next steps","l",PALETTE[4]]].forEach(function(s){
+    var n = makeNode(s[0], root.id, s[1]); n.color = s[2]; root.children.push(n.id);
+  });
+  var g = N(root.children[0]);
+  ["Ship v1","Learn something new"].forEach(function(t){
+    g.children.push(makeNode(t, g.id, "r").id);
+  });
+  sel = root.id;
+}
+
+/* ---------- history ---------- */
+function snap(){ return JSON.stringify({ rootId: M.rootId, nodes: M.nodes }); }
+function push(){
+  undoStack.push(snap());
+  if (undoStack.length > 80) undoStack.shift();
+  redoStack.length = 0;
+}
+function restore(s){
+  M = JSON.parse(s);
+  els.forEach(function(e){ e.node.remove(); }); els.clear();
+  if (!N(sel)) sel = M.rootId;
+  render();
+}
+function undo(){ if (!undoStack.length) return; redoStack.push(snap()); restore(undoStack.pop()); toast("Undone"); }
+function redo(){ if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); toast("Redone"); }
+
+/* ---------- persistence ---------- */
+function idx(){
+  try { var d = JSON.parse(localStorage.getItem(MAPS)); if (d && d.list) return d; } catch(e){}
+  return { current: null, list: [] };
+}
+function setIdx(d){ try { localStorage.setItem(MAPS, JSON.stringify(d)); } catch(e){} }
+function mapKey(id){ return "mindly.map." + id; }
+
+function saveNow(){
+  if (!mapId || !M) return;
+  try {
+    localStorage.setItem(mapKey(mapId), JSON.stringify({ rootId: M.rootId, nodes: M.nodes, view: view }));
+    var d = idx(), found = false;
+    d.list.forEach(function(r){
+      if (r.id === mapId){
+        r.name = N(M.rootId).text; r.count = Object.keys(M.nodes).length;
+        r.color = colorOf(N(M.rootId)); r.updated = Date.now(); found = true;
+      }
+    });
+    if (!found) d.list.unshift({ id: mapId, name: N(M.rootId).text,
+      count: Object.keys(M.nodes).length, color: colorOf(N(M.rootId)), updated: Date.now() });
+    d.current = mapId;
+    setIdx(d);
+  } catch(e){}
+}
+function save(){ clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 350); }
+
+function openMap(id){
+  try {
+    var raw = localStorage.getItem(mapKey(id));
+    if (!raw) return false;
+    var d = JSON.parse(raw);
+    if (!d.rootId || !d.nodes || !d.nodes[d.rootId]) return false;
+    M = { rootId: d.rootId, nodes: d.nodes };
+    view = d.view || { x: 0, y: 0, k: 1 };
+    mapId = id; sel = M.rootId;
+    undoStack = []; redoStack = [];
+    var ix = idx(); ix.current = id; setIdx(ix);
+    els.forEach(function(e){ e.node.remove(); }); els.clear();
+    render(false);
+    return true;
+  } catch(e){ return false; }
+}
+function newMap(quiet){
+  if (M && mapId) saveNow();
+  mapId = uid();
+  starter();
+  undoStack = []; redoStack = [];
+  view = { x: 0, y: 0, k: 1 };
+  els.forEach(function(e){ e.node.remove(); }); els.clear();
+  render(false); fit(); saveNow(); renderMaps();
+  if (!quiet) toast("New mind map \u2014 name the centre, then press Tab");
+}
+function switchMap(id){
+  if (id === mapId) return;
+  saveNow();
+  if (openMap(id)){ renderMaps(); toast("Opened \u201c" + N(M.rootId).text + "\u201d"); }
+}
+function duplicateMap(){
+  saveNow();
+  var copy = JSON.parse(JSON.stringify({ rootId: M.rootId, nodes: M.nodes, view: view }));
+  copy.nodes[copy.rootId].text = N(M.rootId).text + " copy";
+  mapId = uid();
+  try { localStorage.setItem(mapKey(mapId), JSON.stringify(copy)); } catch(e){}
+  openMap(mapId); saveNow(); renderMaps(); fit();
+  toast("Duplicated");
+}
+function deleteMap(id){
+  var d = idx(), row = null;
+  d.list.forEach(function(r){ if (r.id === id) row = r; });
+  if (!row) return;
+  if (!confirm("Delete \u201c" + row.name + "\u201d? This can\u2019t be undone.")) return;
+  d.list = d.list.filter(function(r){ return r.id !== id; });
+  setIdx(d);
+  try { localStorage.removeItem(mapKey(id)); } catch(e){}
+  if (id === mapId){
+    mapId = null;
+    var next = idx().list[0];
+    if (!next || !openMap(next.id)) newMap(true);
+  }
+  renderMaps(); toast("Deleted");
+}
+function renderMaps(){
+  var d = idx();
+  var rows = d.list.slice().sort(function(a, b){ return (b.updated || 0) - (a.updated || 0); });
+  $("#mapsList").innerHTML = rows.map(function(r){
+    return '<div class="maprow' + (r.id === mapId ? " on" : "") + '" data-map="' + r.id + '">' +
+      '<span class="dot" style="background:' + (r.color || "#5b8cff") + '"></span>' +
+      '<span class="nm">' + esc(r.name || "Untitled") + '</span>' +
+      '<span class="meta">' + (r.count || 1) + '</span>' +
+      '<span class="x" data-del="' + r.id + '" title="Delete map">' +
+      '<svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5L5 19"/></svg></span></div>';
+  }).join("") || '<div class="mhead" style="text-transform:none;font-weight:500">No saved maps yet.</div>';
+}
+function esc(t){
+  return String(t).replace(/[&<>"]/g, function(c){
+    return ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" })[c];
+  });
+}
+function bootMaps(){
+  var d = idx();
+  var legacy = localStorage.getItem(KEY);          // a map made before this update
+  if (legacy && !d.list.length){
+    try {
+      var L = JSON.parse(legacy);
+      if (L && L.rootId && L.nodes && L.nodes[L.rootId]){
+        var id = uid();
+        localStorage.setItem(mapKey(id), legacy);
+        d.list.push({ id: id, name: L.nodes[L.rootId].text,
+                      count: Object.keys(L.nodes).length, updated: Date.now() });
+        d.current = id; setIdx(d);
+        localStorage.removeItem(KEY);
+      }
+    } catch(e){}
+    d = idx();
+  }
+  var target = (d.current && localStorage.getItem(mapKey(d.current))) ? d.current
+             : (d.list[0] ? d.list[0].id : null);
+  if (!target || !openMap(target)) newMap(true);
+  renderMaps();
+}
+
+/* ---------- rendering ---------- */
+function walkVisible(id, fn){
+  var n = N(id); fn(n);
+  if (!n.collapsed) n.children.forEach(function(c){ walkVisible(c, fn); });
+}
+function render(animate){
+  if (animate === undefined) animate = true;
+  var seen = new Set();
+  walkVisible(M.rootId, function(n){ seen.add(n.id); sync(n); });
+  els.forEach(function(e, id){ if (!seen.has(id)){ e.node.remove(); els.delete(id); } });
+
+  seen.forEach(function(id){
+    var e = els.get(id), n = N(id);
+    n.w = e.node.offsetWidth; n.h = e.node.offsetHeight;
+  });
+
+  layout();
+
+  seen.forEach(function(id){
+    var n = N(id), e = els.get(id);
+    if (!animate) e.node.style.transition = "none";
+    e.node.style.transform = "translate(" + Math.round(n.x - n.w/2) + "px," + Math.round(n.y - n.h/2) + "px)";
+    if (!animate) requestAnimationFrame(function(){ e.node.style.transition = ""; });
+  });
+  drawEdges();
+  applyView();
+  updateChrome();
+  save();
+}
+
+function sync(n){
+  var e = els.get(n.id);
+  if (!e){
+    var node = document.createElement("div");
+    node.className = "node";
+    node.dataset.id = n.id;
+    node.innerHTML = '<div class="txt"></div><button class="handle" title="Add child">+</button><div class="badge"></div>';
+    world.appendChild(node);
+    e = { node: node, txt: node.querySelector(".txt"),
+          handle: node.querySelector(".handle"), badge: node.querySelector(".badge") };
+    els.set(n.id, e);
+    wireNode(n.id, e);
+    node.style.transition = "none";
+    requestAnimationFrame(function(){ node.style.transition = ""; });
+  }
+  if (editing !== n.id && e.txt.textContent !== n.text) e.txt.textContent = n.text;
+  e.node.style.setProperty("--c", colorOf(n));
+  e.node.classList.toggle("root", isRoot(n.id));
+  e.node.classList.toggle("selected", sel === n.id);
+  e.node.classList.toggle("side-l", !isRoot(n.id) && n.side === "l");
+  e.node.classList.toggle("has-kids", n.children.length > 0);
+  e.node.classList.toggle("collapsed-parent", n.collapsed && n.children.length > 0);
+  e.badge.textContent = n.collapsed ? String(countAll(n.id)) : "−";
+  e.badge.classList.toggle("open", !n.collapsed);
+  e.node.style.zIndex = isRoot(n.id) ? 10 : 5;
+}
+function countAll(id){ var c = 0; walk(id, function(){ c++; }); return c - 1; }
+
+/* tidy tree layout - root splits left / right */
+function layout(){
+  var root = N(M.rootId);
+  root.x = 0; root.y = 0;
+  ["r","l"].forEach(function(side){
+    var list = root.children.filter(function(c){ return N(c).side === side; });
+    if (!list.length) return;
+    var hs = list.map(subH);
+    var total = hs.reduce(function(a,b){ return a + b; }, 0) + VGAP * (list.length - 1);
+    var y = -total / 2;
+    var dir = side === "r" ? 1 : -1;
+    list.forEach(function(c, i){
+      var n = N(c);
+      place(c, root.x + dir * (root.w/2 + HGAP + n.w/2), y + hs[i]/2, dir);
+      y += hs[i] + VGAP;
+    });
+  });
+}
+function subH(id){
+  var n = N(id);
+  if (n.collapsed || !n.children.length) return n.h;
+  var t = n.children.reduce(function(a,c){ return a + subH(c); }, 0) + VGAP * (n.children.length - 1);
+  return Math.max(n.h, t);
+}
+function place(id, cx, cy, dir){
+  var n = N(id);
+  n.x = cx; n.y = cy; n.side = dir === 1 ? "r" : "l";
+  if (n.collapsed || !n.children.length) return;
+  var hs = n.children.map(subH);
+  var total = hs.reduce(function(a,b){ return a + b; }, 0) + VGAP * (n.children.length - 1);
+  var y = cy - total / 2;
+  n.children.forEach(function(c, i){
+    var k = N(c);
+    place(c, cx + dir * (n.w/2 + HGAP + k.w/2), y + hs[i]/2, dir);
+    y += hs[i] + VGAP;
+  });
+}
+
+function drawEdges(){
+  var parts = [];
+  walkVisible(M.rootId, function(n){
+    if (n.collapsed) return;
+    n.children.forEach(function(cid){
+      var c = N(cid), dir = c.side === "r" ? 1 : -1;
+      var px = n.x + dir * n.w/2, py = n.y;
+      var cx = c.x - dir * c.w/2, cy = c.y;
+      var dx = Math.abs(cx - px) * 0.55;
+      parts.push('<path class="edge" d="M' + px + ',' + py +
+        ' C' + (px + dir*dx) + ',' + py + ' ' + (cx - dir*dx) + ',' + cy + ' ' + cx + ',' + cy +
+        '" stroke="' + colorOf(c) +
+        '" stroke-opacity="' + Math.max(0.3, 0.85 - depthOf(c)*0.13) +
+        '" stroke-width="' + Math.max(1.5, 3.4 - depthOf(c)*0.6) + '"/>');
+    });
+  });
+  svg.innerHTML = parts.join("");
+}
+
+/* ---------- view ---------- */
+function applyView(){
+  world.style.transform = "translate(" + view.x + "px," + view.y + "px) scale(" + view.k + ")";
+  var g = $("#grid");
+  g.style.backgroundSize = (26 * view.k) + "px " + (26 * view.k) + "px";
+  g.style.backgroundPosition = view.x + "px " + view.y + "px";
+  $("#zoomval").textContent = Math.round(view.k * 100) + "%";
+}
+function zoomAt(f, cx, cy){
+  var k = Math.min(2.5, Math.max(0.2, view.k * f));
+  var r = k / view.k;
+  view.x = cx - (cx - view.x) * r;
+  view.y = cy - (cy - view.y) * r;
+  view.k = k; applyView(); save();
+}
+function fit(){
+  var ns = []; walkVisible(M.rootId, function(n){ ns.push(n); });
+  if (!ns.length) return;
+  var x1 = Infinity, x2 = -Infinity, y1 = Infinity, y2 = -Infinity;
+  ns.forEach(function(n){
+    x1 = Math.min(x1, n.x - n.w/2); x2 = Math.max(x2, n.x + n.w/2);
+    y1 = Math.min(y1, n.y - n.h/2); y2 = Math.max(y2, n.y + n.h/2);
+  });
+  var pad = 90, W = innerWidth, H = innerHeight;
+  var k = Math.min(1.5, (W - pad*2) / (x2 - x1 || 1), (H - pad*2) / (y2 - y1 || 1));
+  view.k = Math.max(0.2, k);
+  view.x = W/2 - (x1 + x2)/2 * view.k;
+  view.y = H/2 - (y1 + y2)/2 * view.k;
+  applyView(); save();
+}
+function toWorld(sx, sy){ return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k }; }
+
+/* ---------- editing ops ---------- */
+function select(id){
+  sel = id;
+  els.forEach(function(e, i){ e.node.classList.toggle("selected", i === id); });
+  updateChrome();
+}
+function addChild(pid){
+  if (!pid || !N(pid)) return;
+  push();
+  var p = N(pid);
+  p.collapsed = false;
+  var side = "r";
+  if (isRoot(pid)){
+    var r = p.children.filter(function(c){ return N(c).side === "r"; }).length;
+    side = r > (p.children.length - r) ? "l" : "r";
+  } else side = p.side;
+  var n = makeNode("New idea", pid, side);
+  if (isRoot(pid)) n.color = PALETTE[(p.children.length + 1) % PALETTE.length];
+  p.children.push(n.id);
+  sel = n.id; render();
+  requestAnimationFrame(function(){ startEdit(n.id); });
+}
+function addSibling(id){
+  if (!id || !N(id) || isRoot(id)) return addChild(id || M.rootId);
+  push();
+  var n0 = N(id), p = N(n0.parent);
+  var n = makeNode("New idea", p.id, n0.side);
+  if (isRoot(p.id)) n.color = PALETTE[(p.children.length + 1) % PALETTE.length];
+  p.children.splice(p.children.indexOf(id) + 1, 0, n.id);
+  sel = n.id; render();
+  requestAnimationFrame(function(){ startEdit(n.id); });
+}
+function remove(id){
+  if (!id || !N(id)) return;
+  if (isRoot(id)) return toast("The central idea can't be deleted");
+  push();
+  var p = N(N(id).parent);
+  var idx = p.children.indexOf(id);
+  var doomed = []; walk(id, function(n){ doomed.push(n.id); });
+  doomed.forEach(function(d){ delete M.nodes[d]; });
+  p.children.splice(idx, 1);
+  sel = p.children[Math.min(idx, p.children.length - 1)] || p.id;
+  render();
+}
+function toggleCollapse(id){
+  var n = N(id);
+  if (!n || !n.children.length) return;
+  push(); n.collapsed = !n.collapsed; render();
+}
+function reparent(id, newParent){
+  if (id === newParent || isRoot(id) || isAncestor(id, newParent)) return false;
+  push();
+  var n = N(id), old = N(n.parent);
+  old.children.splice(old.children.indexOf(id), 1);
+  n.parent = newParent;
+  var p = N(newParent);
+  p.collapsed = false;
+  p.children.push(id);
+  if (isRoot(newParent) && !n.color) n.color = PALETTE[p.children.length % PALETTE.length];
+  render();
+  return true;
+}
+function setColor(id, c){ push(); N(id).color = c; render(); }
+
+function startEdit(id){
+  var e = els.get(id); if (!e) return;
+  editing = id;
+  e.node.classList.add("editing");
+  e.txt.contentEditable = "true";
+  e.txt.focus();
+  var r = document.createRange(); r.selectNodeContents(e.txt);
+  var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+function stopEdit(commit){
+  if (!editing) return;
+  var id = editing, e = els.get(id);
+  editing = null;
+  if (!e) return;
+  e.txt.contentEditable = "false";
+  e.node.classList.remove("editing");
+  var v = e.txt.textContent.trim();
+  if (commit !== false && N(id) && v !== N(id).text){ push(); N(id).text = v || "Untitled"; }
+  if (N(id)) e.txt.textContent = N(id).text;
+  var s = getSelection(); if (s) s.removeAllRanges();
+  render();
+}
+
+/* ---------- node interaction ---------- */
+function wireNode(id, e){
+  var node = e.node;
+  node.addEventListener("pointerdown", function(ev){
+    if (editing === id) return;
+    if (ev.target === e.handle || ev.target === e.badge) return;
+    ev.stopPropagation();
+    if (editing) stopEdit(true);
+    var wasSelected = sel === id;
+    select(id);
+    startNodeDrag(id, ev, wasSelected);
+  });
+  node.addEventListener("dblclick", function(ev){ ev.stopPropagation(); startEdit(id); });
+  e.handle.addEventListener("click", function(ev){ ev.stopPropagation(); addChild(id); });
+  e.badge.addEventListener("click", function(ev){ ev.stopPropagation(); toggleCollapse(id); });
+  e.txt.addEventListener("keydown", function(ev){
+    if (editing !== id) return;
+    ev.stopPropagation();
+    if (ev.key === "Enter" && !ev.shiftKey){ ev.preventDefault(); stopEdit(true); }
+    else if (ev.key === "Escape"){ ev.preventDefault(); stopEdit(false); }
+    else if (ev.key === "Tab"){ ev.preventDefault(); stopEdit(true); addChild(id); }
+  });
+  e.txt.addEventListener("blur", function(){ if (editing === id) stopEdit(true); });
+  e.txt.addEventListener("paste", function(ev){
+    ev.preventDefault();
+    var t = (ev.clipboardData || window.clipboardData).getData("text");
+    document.execCommand("insertText", false, t.replace(/\s+/g, " "));
+  });
+}
+
+function tapToRename(id, ev){
+  var sx = ev.clientX, sy = ev.clientY, moved = false;
+  function mv(m){ if (Math.hypot(m.clientX - sx, m.clientY - sy) > 8) moved = true; }
+  function up(){
+    removeEventListener("pointermove", mv); removeEventListener("pointerup", up);
+    if (!moved) startEdit(id);
+  }
+  addEventListener("pointermove", mv); addEventListener("pointerup", up);
+}
+function startNodeDrag(id, ev, wasSelected){
+  if (isRoot(id)){
+    if (wasSelected && ev.pointerType !== "mouse") tapToRename(id, ev);
+    return;
+  }
+  var e = els.get(id), n = N(id);
+  var start = toWorld(ev.clientX, ev.clientY);
+  var ox = n.x, oy = n.y;
+  var moved = false, target = null;
+
+  function move(mv){
+    var p = toWorld(mv.clientX, mv.clientY);
+    var dx = p.x - start.x, dy = p.y - start.y;
+    if (!moved && Math.hypot(dx, dy) < 5 / view.k) return;
+    if (!moved){ moved = true; e.node.classList.add("dragging"); }
+    e.node.style.transform = "translate(" + (ox + dx - n.w/2) + "px," + (oy + dy - n.h/2) + "px)";
+    var best = null, bd = 200;
+    walkVisible(M.rootId, function(m){
+      if (isAncestor(id, m.id)) return;
+      var d = Math.hypot(m.x - (ox + dx), m.y - (oy + dy));
+      if (d < bd){ bd = d; best = m.id; }
+    });
+    if (best !== target){
+      if (target && els.get(target)) els.get(target).node.classList.remove("drop-target");
+      target = best;
+      if (target && els.get(target)) els.get(target).node.classList.add("drop-target");
+    }
+  }
+  function up(){
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", up);
+    if (target && els.get(target)) els.get(target).node.classList.remove("drop-target");
+    e.node.classList.remove("dragging");
+    if (moved && target && target !== n.parent){
+      if (reparent(id, target)) toast("Moved under “" + N(target).text + "”");
+      else render();
+    } else {
+      render();
+      // no hover and no reliable double-tap on touch: a second tap renames
+      if (!moved && wasSelected && ev.pointerType !== "mouse") startEdit(id);
+    }
+  }
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+}
+
+/* ---------- canvas pan / zoom ---------- */
+stage.addEventListener("pointerdown", function(ev){
+  if (ev.target.closest(".node")) return;
+  if (editing) stopEdit(true);
+  var sx = ev.clientX, sy = ev.clientY, vx = view.x, vy = view.y, moved = false;
+  stage.classList.add("panning");
+  function move(mv){
+    if (Math.hypot(mv.clientX - sx, mv.clientY - sy) > 3) moved = true;
+    view.x = vx + mv.clientX - sx; view.y = vy + mv.clientY - sy;
+    applyView();
+  }
+  function up(){
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", up);
+    stage.classList.remove("panning");
+    if (!moved){
+      sel = null;
+      els.forEach(function(e){ e.node.classList.remove("selected"); });
+      updateChrome();
+    }
+    save();
+  }
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+});
+stage.addEventListener("wheel", function(ev){
+  ev.preventDefault();
+  if (ev.ctrlKey || ev.metaKey) zoomAt(Math.pow(0.99, ev.deltaY), ev.clientX, ev.clientY);
+  else { view.x -= ev.deltaX; view.y -= ev.deltaY; applyView(); save(); }
+}, { passive: false });
+
+var pts = new Map(), pinch = 0;
+stage.addEventListener("pointerdown", function(e){ pts.set(e.pointerId, e); });
+stage.addEventListener("pointermove", function(e){
+  if (!pts.has(e.pointerId)) return;
+  pts.set(e.pointerId, e);
+  if (pts.size === 2){
+    var v = Array.from(pts.values()), a = v[0], b = v[1];
+    var d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (pinch) zoomAt(d / pinch, (a.clientX + b.clientX)/2, (a.clientY + b.clientY)/2);
+    pinch = d;
+  }
+});
+["pointerup","pointercancel"].forEach(function(t){
+  stage.addEventListener(t, function(e){ pts.delete(e.pointerId); pinch = 0; });
+});
+
+/* ---------- keyboard ---------- */
+addEventListener("keydown", function(ev){
+  if (editing) return;
+  var k = ev.key, mod = ev.ctrlKey || ev.metaKey;
+  if (mod && k.toLowerCase() === "z"){ ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; }
+  if (mod && k.toLowerCase() === "y"){ ev.preventDefault(); redo(); return; }
+  if (mod && k.toLowerCase() === "l"){ ev.preventDefault(); render(); toast("Arranged"); return; }
+  if (mod && k === "0"){ ev.preventDefault(); view.k = 1; applyView(); save(); return; }
+  if (mod) return;
+  if (k === "?"){ toggleHelp(); return; }
+  if (k === "Escape"){ closeMenus(); return; }
+  if (k === "f" || k === "F"){ fit(); return; }
+  if (!sel || !N(sel)){
+    if (k === "Tab"){ ev.preventDefault(); select(M.rootId); }
+    return;
+  }
+  switch (k){
+    case "Tab": ev.preventDefault(); addChild(sel); break;
+    case "Enter": ev.preventDefault(); addSibling(sel); break;
+    case "F2": ev.preventDefault(); startEdit(sel); break;
+    case "Delete": case "Backspace": ev.preventDefault(); remove(sel); break;
+    case " ": ev.preventDefault(); toggleCollapse(sel); break;
+    case "ArrowUp": ev.preventDefault(); sibling(-1); break;
+    case "ArrowDown": ev.preventDefault(); sibling(1); break;
+    case "ArrowLeft": ev.preventDefault(); horiz(-1); break;
+    case "ArrowRight": ev.preventDefault(); horiz(1); break;
+    default:
+      if (k.length === 1){
+        ev.preventDefault();
+        startEdit(sel);
+        els.get(sel).txt.textContent = k;
+        var r = document.createRange(); r.selectNodeContents(els.get(sel).txt); r.collapse(false);
+        var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      }
+  }
+});
+function sibling(d){
+  var n = N(sel); if (!n.parent) return;
+  var s = N(n.parent).children, i = s.indexOf(sel) + d;
+  if (s[i]){ select(s[i]); ensureVisible(s[i]); }
+}
+function horiz(d){
+  var n = N(sel);
+  if (isRoot(sel)){
+    var side = d === 1 ? "r" : "l";
+    var list = n.children.filter(function(c){ return N(c).side === side; });
+    if (!n.collapsed && list.length){ select(list[Math.floor(list.length/2)]); ensureVisible(sel); }
+    return;
+  }
+  var outward = (n.side === "r") ? (d === 1) : (d === -1);
+  if (outward){
+    if (n.collapsed || !n.children.length) return;
+    select(n.children[Math.floor(n.children.length/2)]); ensureVisible(sel);
+  } else if (n.parent){ select(n.parent); ensureVisible(sel); }
+}
+function ensureVisible(id){
+  var n = N(id), sx = n.x * view.k + view.x, sy = n.y * view.k + view.y, m = 130;
+  var dx = 0, dy = 0;
+  if (sx < m) dx = m - sx;
+  if (sx > innerWidth - m) dx = innerWidth - m - sx;
+  if (sy < m) dy = m - sy;
+  if (sy > innerHeight - m) dy = innerHeight - m - sy;
+  if (dx || dy){ view.x += dx; view.y += dy; applyView(); save(); }
+}
+
+/* ---------- chrome ---------- */
+function updateChrome(){
+  var has = !!sel && !!N(sel);
+  function setBtn(act, off){
+    document.querySelectorAll('[data-act="' + act + '"]').forEach(function(b){ b.disabled = !!off; });
+  }
+  setBtn("child", false);
+  setBtn("sibling", !has);
+  setBtn("rename", !has);
+  setBtn("collapse", !has || !N(sel).children.length);
+  setBtn("del", !has || isRoot(sel));
+  setBtn("undo", !undoStack.length);
+  setBtn("redo", !redoStack.length);
+  var bar = $("#colorbar");
+  bar.classList.toggle("show", has);
+  if (has){
+    var cur = colorOf(N(sel));
+    bar.innerHTML = PALETTE.map(function(c){
+      return '<div class="swatch' + (c === cur ? " on" : "") + '" style="background:' + c + '" data-c="' + c + '"></div>';
+    }).join("");
+  }
+}
+$("#mapsMenu").addEventListener("click", function(e){
+  var x = e.target.closest("[data-del]");
+  if (x){ e.stopPropagation(); deleteMap(x.dataset.del); return; }
+  var row = e.target.closest("[data-map]");
+  if (row){ e.stopPropagation(); switchMap(row.dataset.map); closeMenus(); }
+});
+$("#colorbar").addEventListener("click", function(e){
+  var s = e.target.closest(".swatch");
+  if (s && sel && N(sel)) setColor(sel, s.dataset.c);
+});
+
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-act]");
+  if (!b){ if (!e.target.closest(".menu")) closeMenus(); return; }
+  var a = b.dataset.act;
+  if (a !== "filemenu" && a !== "mapsmenu"){
+    $("#fileMenu").classList.remove("show"); $("#mapsMenu").classList.remove("show");
+  }
+  switch (a){
+    case "child": addChild(sel && N(sel) ? sel : M.rootId); break;
+    case "sibling": addSibling(sel && N(sel) ? sel : M.rootId); break;
+    case "del": remove(sel); break;
+    case "rename": if (sel && N(sel)) startEdit(sel); break;
+    case "collapse": if (sel && N(sel)) toggleCollapse(sel); break;
+    case "undo": undo(); break;
+    case "redo": redo(); break;
+    case "tidy": render(); toast("Arranged"); break;
+    case "fit": fit(); break;
+    case "zoomin": zoomAt(1.2, innerWidth/2, innerHeight/2); break;
+    case "zoomout": zoomAt(1/1.2, innerWidth/2, innerHeight/2); break;
+    case "reset": view.k = 1; applyView(); save(); break;
+    case "theme": setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"); break;
+    case "help": toggleHelp(); break;
+    case "filemenu": case "mapsmenu":
+      var m = $(a === "filemenu" ? "#fileMenu" : "#mapsMenu");
+      var other = $(a === "filemenu" ? "#mapsMenu" : "#fileMenu");
+      var r = b.getBoundingClientRect();
+      other.classList.remove("show");
+      if (a === "mapsmenu") renderMaps();
+      m.style.left = Math.max(8, Math.min(r.left, innerWidth - 312)) + "px";
+      m.style.top = (r.bottom + 8) + "px";
+      m.classList.toggle("show");
+      break;
+    case "newmap": newMap(); closeMenus(); break;
+    case "dupmap": duplicateMap(); closeMenus(); break;
+    case "png": exportPNG(); break;
+    case "json": exportJSON(); break;
+    case "import": $("#fileInput").click(); break;
+  }
+});
+function closeMenus(){
+  $("#fileMenu").classList.remove("show");
+  $("#mapsMenu").classList.remove("show");
+  $("#overlay").classList.remove("show");
+}
+function toggleHelp(){ $("#overlay").classList.toggle("show"); }
+$("#overlay").addEventListener("click", closeMenus);
+
+function setTheme(t){
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem(TKEY, t); } catch(e){}
+  $("#themeIcon").innerHTML = t === "light"
+    ? '<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>'
+    : '<path d="M21 13a8.5 8.5 0 01-10-10 8.5 8.5 0 1010 10z"/>';
+}
+
+var toastTimer;
+function toast(msg){
+  var t = $("#toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 1700);
+}
+
+/* ---------- import / export ---------- */
+function anchorSave(blob, name){
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+}
+function download(blob, name){
+  // Hosted viewers hand files over through the download capability;
+  // a plain file:// page just uses a link.
+  if (!window.claude || typeof window.claude.use !== "function") return anchorSave(blob, name);
+  window.claude.use("downloads").then(function(d){
+    if (!d) return anchorSave(blob, name);
+    return blob.arrayBuffer().then(function(buf){
+      return d.save({ filename: name, data: buf });
+    }).then(function(){ toast("Saved " + name); }, function(err){
+      if (err && err.code === "declined") toast("Save cancelled");
+      else if (err && err.code === "too_large") toast("That image is too large to save");
+      else anchorSave(blob, name);
+    });
+  }).catch(function(){ anchorSave(blob, name); });
+}
+function slug(){
+  var s = (N(M.rootId).text || "mindmap").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return s || "mindmap";
+}
+function exportJSON(){
+  var data = JSON.stringify({ app: "mindly", version: 2, rootId: M.rootId, nodes: M.nodes }, null, 2);
+  download(new Blob([data], { type: "application/json" }), slug() + ".json");
+  toast("JSON exported");
+}
+$("#fileInput").addEventListener("change", function(e){
+  var f = e.target.files[0]; if (!f) return;
+  var r = new FileReader();
+  r.onload = function(){
+    try {
+      var d = JSON.parse(r.result);
+      if (!d.rootId || !d.nodes || !d.nodes[d.rootId]) throw new Error("bad");
+      push();
+      M = { rootId: d.rootId, nodes: d.nodes };
+      sel = M.rootId;
+      els.forEach(function(x){ x.node.remove(); }); els.clear();
+      render(false); fit(); toast("Map imported");
+    } catch(err){ toast("That file isn't a Mindly map"); }
+  };
+  r.readAsText(f);
+  e.target.value = "";
+});
+
+function exportPNG(){
+  var ns = []; walkVisible(M.rootId, function(n){ ns.push(n); });
+  var pad = 60, S = 2;
+  var x1 = Infinity, x2 = -Infinity, y1 = Infinity, y2 = -Infinity;
+  ns.forEach(function(n){
+    x1 = Math.min(x1, n.x - n.w/2); x2 = Math.max(x2, n.x + n.w/2);
+    y1 = Math.min(y1, n.y - n.h/2); y2 = Math.max(y2, n.y + n.h/2);
+  });
+  x1 -= pad; y1 -= pad; x2 += pad; y2 += pad;
+  var cv = document.createElement("canvas");
+  cv.width = Math.ceil((x2 - x1) * S); cv.height = Math.ceil((y2 - y1) * S);
+  var g = cv.getContext("2d");
+  g.scale(S, S); g.translate(-x1, -y1);
+  var light = document.documentElement.dataset.theme === "light";
+  g.fillStyle = light ? "#f6f7fb" : "#0e1117";
+  g.fillRect(x1, y1, x2 - x1, y2 - y1);
+
+  walkVisible(M.rootId, function(n){
+    if (n.collapsed) return;
+    n.children.forEach(function(cid){
+      var c = N(cid), dir = c.side === "r" ? 1 : -1;
+      var px = n.x + dir*n.w/2, py = n.y, cx = c.x - dir*c.w/2, cy = c.y;
+      var dx = Math.abs(cx - px) * 0.55;
+      g.beginPath(); g.moveTo(px, py);
+      g.bezierCurveTo(px + dir*dx, py, cx - dir*dx, cy, cx, cy);
+      g.strokeStyle = colorOf(c);
+      g.globalAlpha = Math.max(0.35, 0.85 - depthOf(c)*0.13);
+      g.lineWidth = Math.max(1.5, 3.4 - depthOf(c)*0.6);
+      g.lineCap = "round"; g.stroke(); g.globalAlpha = 1;
+    });
+  });
+
+  ns.forEach(function(n){
+    var root = isRoot(n.id), c = colorOf(n);
+    var x = n.x - n.w/2, y = n.y - n.h/2, r = root ? 18 : 14;
+    g.beginPath(); roundRect(g, x, y, n.w, n.h, r);
+    g.fillStyle = root ? c : (light ? "#ffffff" : "#1b212d");
+    g.fill();
+    if (!root){
+      g.strokeStyle = light ? "rgba(20,30,60,.12)" : "rgba(255,255,255,.10)";
+      g.lineWidth = 1; g.stroke();
+      g.beginPath(); roundRect(g, x, y + 9, 4, Math.max(6, n.h - 18), 2);
+      g.fillStyle = c; g.fill();
+    }
+    g.fillStyle = root ? "#ffffff" : (light ? "#141a26" : "#e8ecf3");
+    g.font = root ? '650 19px Inter, "Segoe UI", Arial, sans-serif'
+                  : '400 15px Inter, "Segoe UI", Arial, sans-serif';
+    g.textAlign = "center"; g.textBaseline = "middle";
+    var lines = wrap(g, n.text, n.w - (root ? 46 : 30));
+    var lh = root ? 26 : 21;
+    lines.forEach(function(ln, i){
+      g.fillText(ln, n.x + (root ? 0 : 3), n.y - (lines.length - 1)*lh/2 + i*lh);
+    });
+  });
+
+  cv.toBlob(function(b){ download(b, slug() + ".png"); toast("PNG exported"); });
+}
+function roundRect(g, x, y, w, h, r){
+  r = Math.min(r, w/2, h/2);
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+function wrap(g, text, maxW){
+  var out = [];
+  String(text).split("\n").forEach(function(para){
+    var line = "";
+    para.split(/\s+/).forEach(function(w){
+      var t = line ? line + " " + w : w;
+      if (g.measureText(t).width > maxW && line){ out.push(line); line = w; }
+      else line = t;
+    });
+    out.push(line);
+  });
+  return out.length ? out : [String(text)];
+}
+
+/* ---------- boot ---------- */
+setTheme(localStorage.getItem(TKEY) ||
+  (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+bootMaps();
+addEventListener("resize", applyView);
+addEventListener("beforeunload", function(){ clearTimeout(saveTimer); saveNow(); });
+})();
+</script>
+</body>
+</html>
