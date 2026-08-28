@@ -13,8 +13,8 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="icon.svg" />
 <title>Mindly — Mind Map</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700&display=swap" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+<meta name="referrer" content="no-referrer" />
 <style>
 :root{
   --bg:#0e1117; --bg-2:#151a23; --grid:rgba(255,255,255,.045);
@@ -386,9 +386,14 @@ function makeNode(text, parent, side){
   M.nodes[n.id] = n;
   return n;
 }
+// Every colour reaching an attribute or a style goes through this first: anything
+// that isn't a plain hex literal is dropped, so an imported file cannot break out.
+function safeColor(c){
+  return (typeof c === "string" && /^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(c)) ? c : null;
+}
 function colorOf(n){
   while (n && !n.color) n = n.parent ? N(n.parent) : null;
-  return n ? n.color : PALETTE[0];
+  return (n && safeColor(n.color)) || PALETTE[0];
 }
 function depthOf(n){ var d = 0; while (n.parent){ n = N(n.parent); d++; } return d; }
 function walk(id, fn){ fn(N(id)); kids(id).forEach(function(c){ walk(c, fn); }); }
@@ -431,12 +436,66 @@ function undo(){ if (!undoStack.length) return; redoStack.push(snap()); restore(
 function redo(){ if (!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); toast("Redone"); }
 
 /* ---------- persistence ---------- */
+var MAX_NODES = 5000, MAX_TEXT = 2000;
+
+/* Rebuilds a map from untrusted input (an imported file, or storage another
+   script could have written) keeping only known fields with known types.
+   The tree is regrown from the root, so cycles, orphans and self-parenting
+   nodes are dropped rather than trusted. Returns null if nothing usable. */
+function sanitizeMap(d){
+  if (!d || typeof d !== "object") return null;
+  var src = d.nodes, rootId = d.rootId;
+  if (!src || typeof src !== "object" || typeof rootId !== "string") return null;
+  var keys = Object.keys(src);
+  if (!keys.length || keys.length > MAX_NODES) return null;
+
+  var clean = Object.create(null), order = Object.create(null);
+  keys.forEach(function(k){
+    if (k === "__proto__" || k === "constructor" || k === "prototype") return;
+    var n = src[k];
+    if (!n || typeof n !== "object") return;
+    clean[k] = {
+      id: k,
+      text: typeof n.text === "string" ? n.text.slice(0, MAX_TEXT) : "Untitled",
+      parent: typeof n.parent === "string" ? n.parent : null,
+      children: [],
+      side: n.side === "l" ? "l" : "r",
+      collapsed: !!n.collapsed,
+      color: safeColor(n.color),
+      x: 0, y: 0, w: 120, h: 40
+    };
+    order[k] = Array.isArray(n.children)
+      ? n.children.filter(function(c){ return typeof c === "string"; }) : [];
+  });
+  if (!clean[rootId]) return null;
+
+  var out = Object.create(null), queue = [rootId], guard = 0;
+  clean[rootId].parent = null;
+  out[rootId] = clean[rootId];
+  while (queue.length && guard++ <= MAX_NODES){
+    var id = queue.shift(), node = out[id], kids = [];
+    (order[id] || []).forEach(function(c){
+      if (clean[c] && !out[c] && clean[c].parent === id && c !== id) kids.push(c);
+    });
+    Object.keys(clean).forEach(function(c){          // parented here but not listed
+      if (clean[c].parent === id && !out[c] && c !== id && kids.indexOf(c) < 0) kids.push(c);
+    });
+    kids.forEach(function(c){ out[c] = clean[c]; node.children.push(c); queue.push(c); });
+  }
+  return { rootId: rootId, nodes: out };
+}
+
 function idx(){
   try { var d = JSON.parse(localStorage.getItem(MAPS)); if (d && d.list) return d; } catch(e){}
   return { current: null, list: [] };
 }
 function setIdx(d){ try { localStorage.setItem(MAPS, JSON.stringify(d)); } catch(e){} }
 function mapKey(id){ return "mindly.map." + id; }
+function safeView(v){
+  var n = function(x, d){ return (typeof x === "number" && isFinite(x)) ? x : d; };
+  if (!v || typeof v !== "object") return { x: 0, y: 0, k: 1 };
+  return { x: n(v.x, 0), y: n(v.y, 0), k: Math.min(2.5, Math.max(0.2, n(v.k, 1))) };
+}
 
 function saveNow(){
   if (!mapId || !M) return;
@@ -461,10 +520,11 @@ function openMap(id){
   try {
     var raw = localStorage.getItem(mapKey(id));
     if (!raw) return false;
-    var d = JSON.parse(raw);
-    if (!d.rootId || !d.nodes || !d.nodes[d.rootId]) return false;
-    M = { rootId: d.rootId, nodes: d.nodes };
-    view = d.view || { x: 0, y: 0, k: 1 };
+    var parsed = JSON.parse(raw);
+    var d = sanitizeMap(parsed);
+    if (!d) return false;
+    M = d;
+    view = safeView(parsed.view);
     mapId = id; sel = M.rootId;
     undoStack = []; redoStack = [];
     var ix = idx(); ix.current = id; setIdx(ix);
@@ -484,7 +544,7 @@ function newMap(quiet){
   if (!quiet) toast("New mind map \u2014 name the centre, then press Tab");
 }
 function switchMap(id){
-  if (id === mapId) return;
+  if (id === mapId || !/^[a-z0-9]{1,32}$/i.test(String(id))) return;
   saveNow();
   if (openMap(id)){ renderMaps(); toast("Opened \u201c" + N(M.rootId).text + "\u201d"); }
 }
@@ -517,7 +577,7 @@ function renderMaps(){
   var rows = d.list.slice().sort(function(a, b){ return (b.updated || 0) - (a.updated || 0); });
   $("#mapsList").innerHTML = rows.map(function(r){
     return '<div class="maprow' + (r.id === mapId ? " on" : "") + '" data-map="' + r.id + '">' +
-      '<span class="dot" style="background:' + (r.color || "#5b8cff") + '"></span>' +
+      '<span class="dot" style="background:' + (safeColor(r.color) || PALETTE[0]) + '"></span>' +
       '<span class="nm">' + esc(r.name || "Untitled") + '</span>' +
       '<span class="meta">' + (r.count || 1) + '</span>' +
       '<span class="x" data-del="' + r.id + '" title="Delete map">' +
@@ -534,10 +594,10 @@ function bootMaps(){
   var legacy = localStorage.getItem(KEY);          // a map made before this update
   if (legacy && !d.list.length){
     try {
-      var L = JSON.parse(legacy);
-      if (L && L.rootId && L.nodes && L.nodes[L.rootId]){
+      var L = sanitizeMap(JSON.parse(legacy));
+      if (L){
         var id = uid();
-        localStorage.setItem(mapKey(id), legacy);
+        localStorage.setItem(mapKey(id), JSON.stringify({ rootId: L.rootId, nodes: L.nodes }));
         d.list.push({ id: id, name: L.nodes[L.rootId].text,
                       count: Object.keys(L.nodes).length, updated: Date.now() });
         d.current = id; setIdx(d);
@@ -588,7 +648,8 @@ function sync(n){
     var node = document.createElement("div");
     node.className = "node";
     node.dataset.id = n.id;
-    node.innerHTML = '<div class="txt"></div><button class="handle" title="Add child">+</button><div class="badge"></div>';
+    node.innerHTML = '<div class="txt" spellcheck="false" autocorrect="off"></div>' +
+      '<button class="handle" title="Add child">+</button><div class="badge"></div>';
     world.appendChild(node);
     e = { node: node, txt: node.querySelector(".txt"),
           handle: node.querySelector(".handle"), badge: node.querySelector(".badge") };
@@ -761,7 +822,7 @@ function reparent(id, newParent){
   render();
   return true;
 }
-function setColor(id, c){ push(); N(id).color = c; render(); }
+function setColor(id, c){ if (!safeColor(c)) return; push(); N(id).color = c; render(); }
 
 function startEdit(id){
   var e = els.get(id); if (!e) return;
@@ -1116,13 +1177,15 @@ $("#fileInput").addEventListener("change", function(e){
   var r = new FileReader();
   r.onload = function(){
     try {
-      var d = JSON.parse(r.result);
-      if (!d.rootId || !d.nodes || !d.nodes[d.rootId]) throw new Error("bad");
+      if (f.size > 8 * 1024 * 1024) throw new Error("too big");
+      var d = sanitizeMap(JSON.parse(r.result));
+      if (!d) throw new Error("bad");
       push();
-      M = { rootId: d.rootId, nodes: d.nodes };
+      M = d;
+      mapId = uid();                       // an imported map is a new map, never an overwrite
       sel = M.rootId;
       els.forEach(function(x){ x.node.remove(); }); els.clear();
-      render(false); fit(); toast("Map imported");
+      render(false); fit(); saveNow(); renderMaps(); toast("Map imported as a new map");
     } catch(err){ toast("That file isn't a Mindly map"); }
   };
   r.readAsText(f);

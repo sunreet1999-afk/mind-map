@@ -37,7 +37,13 @@ installs to the home screen as a fullscreen app — see HOSTING.md.
 ## Putting it online
 See [HOSTING.md](HOSTING.md) — Netlify Drop takes about a minute, GitHub Pages about ten.
 
+## Security & privacy
+No accounts, no server, no network requests at all — maps live only in your browser.
+Imported files are sanitised and the page runs under a strict Content Security Policy.
+Details, including a fixed XSS issue, are in [SECURITY.md](SECURITY.md).
+
 ## Files
 - `index.html` — the entire app (markup, styles, logic)
 - `manifest.json`, `icon.svg`, `icon-maskable.svg` — home-screen install support
+- `SECURITY.md`, `HOSTING.md` — security review and hosting steps
 - `.claude/launch.json` — optional dev-server config for previewing over http
