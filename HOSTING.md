@@ -28,29 +28,42 @@ To update later, drag the folder again.
 
 ## 2. GitHub Pages — a permanent home
 
-Needs a free GitHub account and Git installed.
+The local repository is already set up: `git init` is done, `main` is the branch, and
+everything is committed. Three steps remain.
+
+**Step 1 — make an empty repo on GitHub**
+Open https://github.com/new, set the name to `mind-map`, choose **Public**, and add
+**no** README, .gitignore, or licence (the folder already has them). Click
+*Create repository*.
+
+**Step 2 — push this folder to it** (replace `YOUR-USERNAME`)
 
 ```bash
-cd "D:/mind map"
-git init
-git add index.html manifest.json icon.svg icon-maskable.svg README.md HOSTING.md
-git commit -m "Mindly mind map app"
-git branch -M main
+cd "D:/mind map" && git remote add origin https://github.com/YOUR-USERNAME/mind-map.git && git push -u origin main
 ```
 
-Create an empty repository on github.com (no README), then:
+The first push asks you to sign in — a browser window opens, or Windows Credential
+Manager handles it. If it asks for a password instead, that is a Personal Access Token,
+not your GitHub password: github.com → Settings → Developer settings → Personal access
+tokens → Tokens (classic) → Generate new token, tick `repo`, and paste the token.
+
+**Step 3 — switch Pages on**
+In the repo: **Settings → Pages → Source: "Deploy from a branch" → Branch: `main`,
+folder `/ (root)` → Save.**
+
+After a minute the app is live at:
+
+```
+https://YOUR-USERNAME.github.io/mind-map/
+```
+
+**Updating it later** — edit the files, then:
 
 ```bash
-git remote add origin https://github.com/YOUR-USERNAME/mindly.git
-git push -u origin main
+cd "D:/mind map" && git add -A && git commit -m "update" && git push
 ```
 
-In the repo: **Settings → Pages → Source: Deploy from a branch → Branch: `main` / `root` → Save.**
-
-After a minute your app is live at `https://YOUR-USERNAME.github.io/mindly/`.
-To update it later: edit the files, then `git add -A && git commit -m "update" && git push`.
-
----
+The live site refreshes about a minute after each push.
 
 ## 3. Cloudflare Pages
 
