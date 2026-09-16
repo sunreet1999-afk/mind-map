@@ -351,7 +351,7 @@ kbd{
 .node .handle{right:-40px}
 .badge{cursor:pointer;user-select:none}
 .badge.open{background:transparent;color:var(--c);
-  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--c) 55%, transparent);opacity:0;transition:.15s}
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--c) 55%, transparent);opacity:.6;transition:.15s}
 .node:hover .badge.open,.node.selected .badge.open{opacity:1}
 .node.has-kids .badge{display:flex}
 </style>
@@ -665,7 +665,11 @@ function sync(n){
   e.node.classList.toggle("side-l", !isRoot(n.id) && n.side === "l");
   e.node.classList.toggle("has-kids", n.children.length > 0);
   e.node.classList.toggle("collapsed-parent", n.collapsed && n.children.length > 0);
-  e.badge.textContent = n.collapsed ? String(countAll(n.id)) : "−";
+  var kids = n.children.length;
+  e.badge.textContent = n.collapsed ? String(countAll(n.id)) : String(kids);
+  e.badge.title = n.collapsed
+    ? countAll(n.id) + " hidden — click to expand"
+    : kids + (kids === 1 ? " branch" : " branches") + " — click to collapse";
   e.badge.classList.toggle("open", !n.collapsed);
   e.node.style.zIndex = isRoot(n.id) ? 10 : 5;
 }
