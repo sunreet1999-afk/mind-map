@@ -84,10 +84,13 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .node.dragging{opacity:.92;transform:scale(1.02);z-index:50}
 .node.collapsed-parent .badge{display:flex}
 .badge{
-  display:none; position:absolute; right:-11px; top:50%; transform:translateY(-50%);
-  min-width:22px;height:22px;padding:0 6px;border-radius:11px;
-  align-items:center;justify-content:center;font-size:11px;font-weight:700;
-  background:var(--c);color:#fff;box-shadow:var(--shadow);
+  display:none; position:absolute; right:-12px; top:50%; transform:translateY(-50%);
+  min-width:23px;height:23px;padding:0 6px;border-radius:12px;
+  align-items:center;justify-content:center;font-size:12px;font-weight:700;
+  font-variant-numeric:tabular-nums;
+  background:var(--c);color:#fff;
+  /* ring in the canvas colour so the count lifts off the branch line behind it */
+  box-shadow:0 0 0 2px var(--bg), var(--shadow);
 }
 .handle{
   position:absolute; right:-26px; top:50%; transform:translateY(-50%) scale(.6);
@@ -347,11 +350,11 @@ kbd{
 .txt{outline:none;white-space:pre-wrap;min-width:14px}
 .node.drop-target{box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 60%, transparent), var(--shadow)}
 .node.side-l .handle{right:auto;left:-40px}
-.node.side-l .badge{right:auto;left:-11px}
+.node.side-l .badge{right:auto;left:-12px}
 .node .handle{right:-40px}
 .badge{cursor:pointer;user-select:none}
-.badge.open{background:transparent;color:var(--c);
-  box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--c) 55%, transparent);opacity:.6;transition:.15s}
+.badge.open{background:var(--c);color:#fff;
+  box-shadow:0 0 0 2px var(--bg), var(--shadow);opacity:1;transition:.15s}
 .node:hover .badge.open,.node.selected .badge.open{opacity:1}
 .node.has-kids .badge{display:flex}
 </style>
