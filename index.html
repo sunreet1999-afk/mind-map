@@ -391,10 +391,12 @@ var undoStack = [], redoStack = [], saveTimer = null;
 var $ = function(s){ return document.querySelector(s); };
 var stage = $("#stage"), world = $("#world"), svg = $("#edges");
 var uid = function(){ return Math.random().toString(36).slice(2, 9); };
-var TOUCH = matchMedia("(pointer:coarse)").matches;
+// Checked live rather than captured at load: a tablet gaining or losing a mouse,
+// or a desktop window resized into phone territory, should switch behaviour too.
+function isTouch(){ return matchMedia("(pointer:coarse)").matches; }
 // a short tick confirms an edit landed without the user checking the screen
 function buzz(ms){
-  if (!TOUCH || !navigator.vibrate) return;
+  if (!isTouch() || !navigator.vibrate) return;
   try { navigator.vibrate(ms); } catch(e){}
 }
 
@@ -778,14 +780,14 @@ function fit(readable){
     x1 = Math.min(x1, n.x - n.w/2); x2 = Math.max(x2, n.x + n.w/2);
     y1 = Math.min(y1, n.y - n.h/2); y2 = Math.max(y2, n.y + n.h/2);
   });
-  var pad = TOUCH ? 40 : 90, W = innerWidth, H = innerHeight;
+  var pad = isTouch() ? 40 : 90, W = innerWidth, H = innerHeight;
   var k = Math.min(1.5, (W - pad*2) / (x2 - x1 || 1), (H - pad*2) / (y2 - y1 || 1));
   view.k = Math.max(0.2, k);
   /* On a phone a whole map often only "fits" at 25%, which is just unreadable text.
      Automatic fits therefore stop at a legible zoom and centre on the root instead —
      you pan to explore. An explicit fit (button, F, double-tap) still zooms all the
      way out, because there you asked for the overview. */
-  if (readable && TOUCH && view.k < 0.62){
+  if (readable && isTouch() && view.k < 0.62){
     view.k = 0.62;
     var root = N(M.rootId);
     view.x = W/2 - root.x * view.k;
@@ -870,7 +872,7 @@ function startEdit(id){
   e.txt.focus();
   var r = document.createRange(); r.selectNodeContents(e.txt);
   var s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  if (TOUCH){                       // the keyboard animates in, so measure after it
+  if (isTouch()){                   // the keyboard animates in, so measure after it
     setTimeout(keyboardPan, 320);
     setTimeout(keyboardPan, 650);
   }
@@ -1001,7 +1003,7 @@ stage.addEventListener("pointerdown", function(ev){
 });
 var lastTap = 0, lastTapX = 0, lastTapY = 0;
 stage.addEventListener("pointerup", function(ev){
-  if (!TOUCH || ev.target.closest(".node") || ev.target.closest(".bar") ||
+  if (!isTouch() || ev.target.closest(".node") || ev.target.closest(".bar") ||
       ev.target.closest(".menu") || ev.target.closest("aside")) return;
   var now = Date.now();
   if (now - lastTap < 320 && Math.hypot(ev.clientX - lastTapX, ev.clientY - lastTapY) < 32){
