@@ -32,7 +32,7 @@
   --shadow:0 8px 24px rgba(25,35,70,.10), 0 1px 3px rgba(25,35,70,.10);
 }
 *{box-sizing:border-box}
-html,body{height:100%;margin:0;overflow:hidden}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
 body{
   font:15px/1.45 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   color:var(--text); background:var(--bg);
@@ -189,12 +189,15 @@ kbd{
 
 /* touch devices: affordances can't rely on hover */
 @media (pointer:coarse){
-  .handle{opacity:1;transform:translateY(-50%) scale(1);
-    width:28px;height:28px;font-size:18px;right:-48px}
-  .node.side-l .handle{left:-48px;right:auto}
+  /* the hover "+" has no hover on a phone and only crowds the canvas —
+     the thumb bar's Child button does the same job */
+  .handle{display:none}
   .badge.open{opacity:1}
-  .node{padding:11px 15px 11px 16px}
-  .node.root{padding:15px 24px}
+  .badge{min-width:26px;height:26px;border-radius:13px;font-size:12.5px;right:-13px}
+  .node.side-l .badge{left:-13px;right:auto}
+  .node{padding:12px 16px 12px 17px;min-height:44px}
+  .node.root{padding:16px 24px}
+  .txt{align-self:center}
 }
 
 @media (max-width:760px){
@@ -202,17 +205,25 @@ kbd{
   #hintbar,#zoombar{display:none}
   #topbar{top:calc(10px + env(safe-area-inset-top));
     left:10px;right:10px;width:auto;transform:none;
-    overflow-x:auto;scrollbar-width:none;justify-content:flex-start}
+    overflow-x:auto;scrollbar-width:none;justify-content:space-between}
   #topbar::-webkit-scrollbar{display:none}
   #topbar .btn{flex:none}
+  /* Idea / sibling / delete live in the thumb bar on a phone; two copies of the
+     same three buttons is what made this strip need scrolling */
+  #topbar [data-act="child"],#topbar [data-act="sibling"],
+  #topbar [data-act="del"],#topbar [data-act="redo"],#topbar .sep{display:none}
+  #topbar [data-act="undo"]{display:none}
   .menu{max-width:calc(100vw - 20px)}
 
   #mobilebar{display:flex;justify-content:space-between;gap:2px;
     left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));
     transform:none;padding:6px}
-  #mobilebar .btn{flex:1;height:50px;min-width:0;padding:0 4px;
+  #mobilebar .btn{flex:1;height:52px;min-width:0;padding:0 2px;
     flex-direction:column;gap:3px}
   #mobilebar .btn svg{width:19px;height:19px}
+  #mobilebar .mlbl{font-size:10px}
+  /* a disabled action should read as unavailable, not invisible */
+  #mobilebar .btn[disabled]{opacity:.28}
 
   #colorbar{bottom:calc(96px + env(safe-area-inset-bottom));
     left:10px;right:10px;transform:translateY(14px);
@@ -297,6 +308,9 @@ kbd{
   <button class="btn" data-act="collapse" title="Collapse or expand">
     <svg viewBox="0 0 24 24"><path d="M8 9l4 4 4-4"/><path d="M4 5h16"/><path d="M4 19h16"/></svg><span class="mlbl">Fold</span>
   </button>
+  <button class="btn" data-act="undo" title="Undo">
+    <svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg><span class="mlbl">Undo</span>
+  </button>
   <button class="btn" data-act="del" title="Delete">
     <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg><span class="mlbl">Delete</span>
   </button>
@@ -377,6 +391,12 @@ var undoStack = [], redoStack = [], saveTimer = null;
 var $ = function(s){ return document.querySelector(s); };
 var stage = $("#stage"), world = $("#world"), svg = $("#edges");
 var uid = function(){ return Math.random().toString(36).slice(2, 9); };
+var TOUCH = matchMedia("(pointer:coarse)").matches;
+// a short tick confirms an edit landed without the user checking the screen
+function buzz(ms){
+  if (!TOUCH || !navigator.vibrate) return;
+  try { navigator.vibrate(ms); } catch(e){}
+}
 
 /* ---------- model helpers ---------- */
 function N(id){ return M.nodes[id]; }
@@ -543,7 +563,7 @@ function newMap(quiet){
   undoStack = []; redoStack = [];
   view = { x: 0, y: 0, k: 1 };
   els.forEach(function(e){ e.node.remove(); }); els.clear();
-  render(false); fit(); saveNow(); renderMaps();
+  render(false); fit(true); saveNow(); renderMaps();
   if (!quiet) toast("New mind map \u2014 name the centre, then press Tab");
 }
 function switchMap(id){
@@ -557,7 +577,7 @@ function duplicateMap(){
   copy.nodes[copy.rootId].text = N(M.rootId).text + " copy";
   mapId = uid();
   try { localStorage.setItem(mapKey(mapId), JSON.stringify(copy)); } catch(e){}
-  openMap(mapId); saveNow(); renderMaps(); fit();
+  openMap(mapId); saveNow(); renderMaps(); fit(true);
   toast("Duplicated");
 }
 function deleteMap(id){
@@ -750,7 +770,7 @@ function zoomAt(f, cx, cy){
   view.y = cy - (cy - view.y) * r;
   view.k = k; applyView(); save();
 }
-function fit(){
+function fit(readable){
   var ns = []; walkVisible(M.rootId, function(n){ ns.push(n); });
   if (!ns.length) return;
   var x1 = Infinity, x2 = -Infinity, y1 = Infinity, y2 = -Infinity;
@@ -758,11 +778,22 @@ function fit(){
     x1 = Math.min(x1, n.x - n.w/2); x2 = Math.max(x2, n.x + n.w/2);
     y1 = Math.min(y1, n.y - n.h/2); y2 = Math.max(y2, n.y + n.h/2);
   });
-  var pad = 90, W = innerWidth, H = innerHeight;
+  var pad = TOUCH ? 40 : 90, W = innerWidth, H = innerHeight;
   var k = Math.min(1.5, (W - pad*2) / (x2 - x1 || 1), (H - pad*2) / (y2 - y1 || 1));
   view.k = Math.max(0.2, k);
-  view.x = W/2 - (x1 + x2)/2 * view.k;
-  view.y = H/2 - (y1 + y2)/2 * view.k;
+  /* On a phone a whole map often only "fits" at 25%, which is just unreadable text.
+     Automatic fits therefore stop at a legible zoom and centre on the root instead —
+     you pan to explore. An explicit fit (button, F, double-tap) still zooms all the
+     way out, because there you asked for the overview. */
+  if (readable && TOUCH && view.k < 0.62){
+    view.k = 0.62;
+    var root = N(M.rootId);
+    view.x = W/2 - root.x * view.k;
+    view.y = H/2 - root.y * view.k;
+  } else {
+    view.x = W/2 - (x1 + x2)/2 * view.k;
+    view.y = H/2 - (y1 + y2)/2 * view.k;
+  }
   applyView(); save();
 }
 function toWorld(sx, sy){ return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k }; }
@@ -786,7 +817,7 @@ function addChild(pid){
   var n = makeNode("New idea", pid, side);
   if (isRoot(pid)) n.color = PALETTE[(p.children.length + 1) % PALETTE.length];
   p.children.push(n.id);
-  sel = n.id; render();
+  sel = n.id; render(); buzz(8);
   requestAnimationFrame(function(){ startEdit(n.id); });
 }
 function addSibling(id){
@@ -796,7 +827,7 @@ function addSibling(id){
   var n = makeNode("New idea", p.id, n0.side);
   if (isRoot(p.id)) n.color = PALETTE[(p.children.length + 1) % PALETTE.length];
   p.children.splice(p.children.indexOf(id) + 1, 0, n.id);
-  sel = n.id; render();
+  sel = n.id; render(); buzz(8);
   requestAnimationFrame(function(){ startEdit(n.id); });
 }
 function remove(id){
@@ -809,7 +840,7 @@ function remove(id){
   doomed.forEach(function(d){ delete M.nodes[d]; });
   p.children.splice(idx, 1);
   sel = p.children[Math.min(idx, p.children.length - 1)] || p.id;
-  render();
+  render(); buzz(18);
 }
 function toggleCollapse(id){
   var n = N(id);
@@ -839,6 +870,10 @@ function startEdit(id){
   e.txt.focus();
   var r = document.createRange(); r.selectNodeContents(e.txt);
   var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  if (TOUCH){                       // the keyboard animates in, so measure after it
+    setTimeout(keyboardPan, 320);
+    setTimeout(keyboardPan, 650);
+  }
 }
 function stopEdit(commit){
   if (!editing) return;
@@ -964,6 +999,15 @@ stage.addEventListener("pointerdown", function(ev){
   addEventListener("pointermove", move);
   addEventListener("pointerup", up);
 });
+var lastTap = 0, lastTapX = 0, lastTapY = 0;
+stage.addEventListener("pointerup", function(ev){
+  if (!TOUCH || ev.target.closest(".node") || ev.target.closest(".bar") ||
+      ev.target.closest(".menu") || ev.target.closest("aside")) return;
+  var now = Date.now();
+  if (now - lastTap < 320 && Math.hypot(ev.clientX - lastTapX, ev.clientY - lastTapY) < 32){
+    lastTap = 0; fit(); buzz(10); toast("Whole map on screen");
+  } else { lastTap = now; lastTapX = ev.clientX; lastTapY = ev.clientY; }
+});
 stage.addEventListener("wheel", function(ev){
   ev.preventDefault();
   if (ev.ctrlKey || ev.metaKey) zoomAt(Math.pow(0.99, ev.deltaY), ev.clientX, ev.clientY);
@@ -1041,6 +1085,25 @@ function horiz(d){
     select(n.children[Math.floor(n.children.length/2)]); ensureVisible(sel);
   } else if (n.parent){ select(n.parent); ensureVisible(sel); }
 }
+/* The on-screen keyboard covers the bottom half of the screen, and the node being
+   renamed is usually exactly where it lands. visualViewport reports the space that
+   is actually still visible, so pan the canvas to keep the node inside it. */
+function keyboardPan(){
+  if (!editing || !window.visualViewport) return;
+  var n = N(editing); if (!n) return;
+  var vv = window.visualViewport;
+  var topEdge = 96, bottomEdge = vv.height - 20;
+  if (bottomEdge <= topEdge) return;
+  var half = (n.h * view.k) / 2, sy = n.y * view.k + view.y, dy = 0;
+  if (sy - half < topEdge) dy = topEdge - (sy - half);
+  else if (sy + half > bottomEdge) dy = bottomEdge - (sy + half);
+  if (dy){ view.y += dy; applyView(); }
+}
+if (window.visualViewport){
+  visualViewport.addEventListener("resize", keyboardPan);
+  visualViewport.addEventListener("scroll", keyboardPan);
+}
+
 function ensureVisible(id){
   var n = N(id), sx = n.x * view.k + view.x, sy = n.y * view.k + view.y, m = 130;
   var dx = 0, dy = 0;
@@ -1192,7 +1255,7 @@ $("#fileInput").addEventListener("change", function(e){
       mapId = uid();                       // an imported map is a new map, never an overwrite
       sel = M.rootId;
       els.forEach(function(x){ x.node.remove(); }); els.clear();
-      render(false); fit(); saveNow(); renderMaps(); toast("Map imported as a new map");
+      render(false); fit(true); saveNow(); renderMaps(); toast("Map imported as a new map");
     } catch(err){ toast("That file isn't a Mindly map"); }
   };
   r.readAsText(f);
