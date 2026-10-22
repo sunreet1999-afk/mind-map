@@ -519,12 +519,13 @@ function mapKey(id){ return "mindly.map." + id; }
 function safeView(v){
   var n = function(x, d){ return (typeof x === "number" && isFinite(x)) ? x : d; };
   if (!v || typeof v !== "object") return { x: 0, y: 0, k: 1 };
-  return { x: n(v.x, 0), y: n(v.y, 0), k: Math.min(2.5, Math.max(0.2, n(v.k, 1))) };
+  return { x: n(v.x, 0), y: n(v.y, 0), k: Math.min(2.5, Math.max(0.2, n(v.k, 1))), sw: n(v.sw, 0) };
 }
 
 function saveNow(){
   if (!mapId || !M) return;
   try {
+    view.sw = innerWidth;               // remember which screen this view was made for
     localStorage.setItem(mapKey(mapId), JSON.stringify({ rootId: M.rootId, nodes: M.nodes, view: view }));
     var d = idx(), found = false;
     d.list.forEach(function(r){
@@ -555,6 +556,9 @@ function openMap(id){
     var ix = idx(); ix.current = id; setIdx(ix);
     els.forEach(function(e){ e.node.remove(); }); els.clear();
     render(false);
+    // a view saved on a desktop leaves the map tiny in a corner on a phone (and vice
+    // versa), so only reuse it on a screen of about the same width
+    if (screenChanged(view.sw)) fit(true);
     return true;
   } catch(e){ return false; }
 }
@@ -796,8 +800,10 @@ function fit(readable){
     view.x = W/2 - (x1 + x2)/2 * view.k;
     view.y = H/2 - (y1 + y2)/2 * view.k;
   }
+  view.sw = innerWidth;
   applyView(); save();
 }
+function screenChanged(sw){ return !sw || Math.abs(sw - innerWidth) > 80; }
 function toWorld(sx, sy){ return { x: (sx - view.x) / view.k, y: (sy - view.y) / view.k }; }
 
 /* ---------- editing ops ---------- */
@@ -1348,7 +1354,11 @@ function wrap(g, text, maxW){
 setTheme(localStorage.getItem(TKEY) ||
   (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
 bootMaps();
-addEventListener("resize", applyView);
+addEventListener("resize", function(){
+  // rotating a phone or dragging a window to phone width needs a fresh fit;
+  // the keyboard opening only changes the height, so that is left alone
+  if (screenChanged(view.sw)) fit(true); else applyView();
+});
 addEventListener("beforeunload", function(){ clearTimeout(saveTimer); saveNow(); });
 })();
 </script>
