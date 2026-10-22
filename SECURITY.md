@@ -3,9 +3,16 @@
 ## Where your data lives
 
 Everything you type stays in your own browser's `localStorage`, on that one device.
-There is no account, no server, no database, and no sync. The app makes **zero network
-requests** after the page loads — no analytics, no fonts, no CDNs, no telemetry. Nobody,
-including whoever hosts the page, can read your maps.
+There is no account, no server, no database, and no sync. No analytics, no fonts, no CDNs,
+no telemetry. Nobody, including whoever hosts the page, can read your maps.
+
+The **only** network request the app can make is the optional **Notebook → AI → Build
+with AI** button. When you press it, that notebook's text and your API key go straight from
+your browser to `api.anthropic.com` (Anthropic's API) and nowhere else — never to the host.
+Nothing is sent unless you press the button, and the plain **Build map** stays fully
+offline. If you tick **Remember key on this device**, the key is stored in this browser's
+`localStorage`, where anyone using this browser profile can read it; leave it unticked on a
+shared device.
 
 The practical consequence: clearing your browser's site data deletes your maps, and a map
 made on your laptop will not appear on your phone. Use **File → Export JSON** to keep a
@@ -32,9 +39,13 @@ Fixes applied:
   types (`sanitizeMap`), then the tree is regrown from the root. Cycles, self-parenting
   nodes, orphans, and `__proto__` / `constructor` keys are dropped rather than trusted.
   Text is capped at 2,000 characters per node, 5,000 nodes and 8 MB per file.
-- **Content Security Policy** — `default-src 'none'` with `connect-src 'none'`, so even if
-  something did execute, it has no way to send data out. No external scripts, styles,
-  images, or frames can load.
+- **Content Security Policy** — `default-src 'none'`, and `connect-src` allows only
+  `https://api.anthropic.com` (for the optional AI button), so injected code could not send
+  data to any other server. No external scripts, styles, images, or frames can load.
+- **AI replies are untrusted** — Claude's answer is rebuilt from the root with the same
+  caps as an imported file (bad ids, cycles and orphans dropped) and shown as text, never
+  HTML. The notes are sent marked as data and Claude is told not to follow instructions
+  inside them.
 - **No third-party requests** — the Google Fonts link was removed; the app now uses system
   fonts and loads nothing from outside its own origin.
 - **Imports never overwrite** — an imported file always becomes a *new* map, so a bad file
@@ -63,5 +74,5 @@ The whole app is one readable file. To confirm the claims above:
 grep -nE "fetch\(|XMLHttpRequest|WebSocket|sendBeacon|https?://" index.html
 ```
 
-That returns nothing outside comments — there is no code capable of sending your data
-anywhere.
+The only hit is the `fetch` to `https://api.anthropic.com/v1/messages` inside `aiBuild`,
+which runs only when you press **Build with AI**.
